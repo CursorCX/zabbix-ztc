@@ -1,0 +1,256 @@
+#!/usr/bin/env python
+#pylint: disable=W0232
+"""
+ztc.nginx package
+
+Copyright (c) 2010 Vladimir Rusinov <vladimir@greenmice.info>
+License: GPL3
+This file is part of ZTC [http://bitbucket.org/rvs/ztc/]
+"""
+
+import urllib2
+import time
+
+#import ztc.commons
+from ztc.check import ZTCCheck, CheckFail
+from ztc.store import ZTCStore
+
+
+class NginxStatus(ZTCCheck):
+    """ Nginx status page reader and parser """
+
+    OPTPARSE_MIN_NUMBER_OF_ARGS = 1
+    OPTPARSE_MAX_NUMBER_OF_ARGS = 1
+    name = 'nginx'
+
+    _page_data = None  # data from status page
+    _http_new_status = None  # http new status data from status page
+    _http_old_status = None  # http old status data from status page
+    ping_time = 0
+
+    #pylint: disable=W0613
+    def _get(self, metric=None, *args, **kwargs):
+        """ get metric """
+        allowed_metrics = ('accepts', 'handled', 'requests',
+            'connections_active', 'connections_reading', 'connections_waiting',
+            'connections_writing', 'ping', '2xx', '3xx', '4xx', '5xx')
+        if metric in allowed_metrics:
+            return self.__getattribute__('get_' + metric)()
+        else:
+            raise CheckFail("Requested not allowed metric")
+
+    def _read_status(self):
+        """ urlopen and save to _page_data text of status page """
+        if self._page_data is not None:
+            # we've already retrieved it
+            return True
+
+        st = ZTCStore('nginx.status_page', self.options)
+        try:
+            read_start = time.time()
+            url = "%s://%s:%s%s?auto" % (
+                                         self.config.get('proto', 'http'),
+                                         self.config.get('host', 'localhost'),
+                                         self.config.get('port', '8080'),
+                                         self.config.get('resource',
+                                                         '/server-status'))
+            try:
+                u = urllib2.urlopen(url, None, 1)
+            except TypeError:
+                u = urllib2.urlopen(url, None)
+            self._page_data = u.readlines()
+            u.close()
+            st.set(self._page_data)
+            # calulate how many time was required:
+            self.ping_time = time.time() - read_start
+            return True
+        except urllib2.URLError:
+            self.logger.exception('failed to load test page')
+            # status page read failed
+            self._page_data = st.get()
+            self.ping_time = 0  # status page read failed
+            return False
+
+    def clear_store(self):
+        """ urlopen and save to _page_data text of status page """
+        st = ZTCStore('nginx.http_status_page', self.options)
+        # get old http status
+        st.clear()
+
+    def _read_http_status(self):
+        """ urlopen and save to _page_data text of status page """
+        if self._http_new_status is not None:
+            # we've already retrieved it
+            return True
+
+        st = ZTCStore('nginx.http_status_page', self.options)
+        # get old http status
+        self._http_old_status = st.get()
+        try:
+            read_start = time.time()
+            url = "%s://%s:%s%s?auto" % (
+                                         self.config.get('proto', 'http'),
+                                         self.config.get('host', 'localhost'),
+                                         self.config.get('port', '80'),
+                                         self.config.get('status',
+                                                         '/status-codes'))
+            try:
+                u = urllib2.urlopen(url, None, 1)
+            except TypeError:
+                u = urllib2.urlopen(url, None)
+            self._http_new_status = u.readlines()
+            u.close()
+            st.set(self._http_new_status)
+            return True
+        except urllib2.URLError:
+            self.logger.exception('failed to load test page')
+            # status page read failed
+            self._http_new_status = st.get()
+            self.ping_time = 0  # status page read failed
+            return False
+
+    def _get_info(self, name):
+        """ Extracts info from status """
+        self._read_status()
+        ret = None
+        for l in self._page_data.split("\n"):
+            if l.find(name + ": ") == 0:
+                ret = l.split()[-1]
+                break
+        return ret
+
+    def _http_status_delta(self, type):
+        """ Calculate http staus delta """
+        count_new = 0
+        count_old = 0
+        for item in self._http_new_status[1:]:
+            if item[0] == type[0]:
+                count_new += int(item.split(' ')[1])
+        for item in self._http_old_status[1:]:
+            if item[0] == type[0]:
+                count_old += int(item.split(' ')[1])
+
+        if count_new < count_old :
+            http_delta = 0
+        else:
+            http_delta = count_new - count_old
+        return http_delta
+
+    def get_2xx(self):
+        """ Number of 2xx delta state """
+        self._read_http_status()
+        if self._http_new_status:
+            return self._http_status_delta("2xx")
+        else:
+            return 0
+    status_2xx = property(get_2xx)
+
+    def get_3xx(self):
+        """ Number of 3xx delta state """
+        self._read_http_status()
+        if self._http_new_status:
+            return self._http_status_delta("3xx")
+        else:
+            return 0
+    status_3xx = property(get_3xx)
+
+    def get_4xx(self):
+        """ Number of 4xx delta state """
+        self._read_http_status()
+        if self._http_new_status:
+            return self._http_status_delta("4xx")
+        else:
+            return 0
+    status_4xx = property(get_4xx)
+
+    def get_5xx(self):
+        """ Number of 5xx delta state """
+        self._read_http_status()
+        if self._http_new_status:
+            return self._http_status_delta("5xx")
+        else:
+            return 0
+    status_5xx = property(get_5xx)
+
+    def get_accepts(self):
+        """ Number of accept()s since server start """
+        self._read_status()
+        if self._page_data:
+            my_line = self._page_data[2]
+            return int(my_line.split()[0])
+        else:
+            return 0
+    accepts = property(get_accepts)
+
+    def get_handled(self):
+        """ Number of handled()s since server start """
+        self._read_status()
+        if self._page_data:
+            my_line = self._page_data[2]
+            return int(my_line.split()[1])
+        else:
+            # no data neither in nginx or cache
+            return 0
+    handled = property(get_handled)
+
+    def get_requests(self):
+        """ Number of requests()s since server start """
+        self._read_status()
+        if self._page_data:
+            my_line = self._page_data[2]
+            return int(my_line.split()[2])
+        else:
+            return 0
+    requests = property(get_requests)
+
+    def get_connections_active(self):
+        """
+        first line:
+        Active connections: 123
+        """
+        try:
+            self._read_status()
+            my = self._page_data[0].split()[-1]
+            return int(my)
+        except:
+            return 0
+    connections_active = property(get_connections_active)
+
+    def get_connections_reading(self):
+        try:
+            self._read_status()
+            my = self._page_data[-1].split()[1]
+            return int(my)
+        except:
+            return 0
+    connections_reading = property(get_connections_reading)
+
+    def get_connections_waiting(self):
+        try:
+            self._read_status()
+            my = self._page_data[-1].split()[5]
+            return int(my)
+        except:
+            return 0
+    connections_waiting = property(get_connections_waiting)
+
+    def get_connections_writing(self):
+        try:
+            self._read_status()
+            my = self._page_data[-1].split()[3]
+            return int(my)
+        except:
+            return 0
+    connections_writing = property(get_connections_writing)
+
+    def get_ping(self):
+        try:
+            self._read_status()
+        finally:
+            return self.ping_time
+    ping = property(get_ping)
+
+
+if __name__ == '__main__':
+    st = NginxStatus()
+    st.clear_store()
