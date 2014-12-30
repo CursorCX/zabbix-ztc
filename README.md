@@ -1,7 +1,7 @@
 ### ztc 说明
-zabbix 第三方模板, 涵盖大量监控项
-官方网址:
-    https://bitbucket.org/rvs/ztc
+    zabbix 第三方模板, 涵盖大量监控项
+    官方网址:
+        https://bitbucket.org/rvs/ztc
 
 ### php 监控
 针对 php-fpm 慢日志, 错误日志, 活动队列, 空闲进程等状态进行监控
