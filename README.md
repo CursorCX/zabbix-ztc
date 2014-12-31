@@ -11,5 +11,24 @@
 ### 3. nginx 监控
     ztc 自带对nginx 状态的监控, 通过抓取 http://localhost/nginx_status, 得到当前nginx状态信息
     通过分析nginx日志,得到http状态码,采用seek方式,快速高效分析日志
+    nginx_status 配置以及 fpm_status 的配置
+    server {
+        listen 80 default_server;
+        server_name localhost;
+        allow           127.0.0.1;
+        deny            all;
+        location /nginx_status {
+            stub_status     on;
+        }
+        location /fpm_status {
+            fastcgi_pass    127.0.0.1:9000;
+            include         fastcgi_params;
+        }
+        location /apc_status {
+            root /etc/nginx/document/stats_apc.php;
+            fastcgi_pass    127.0.0.1:9099;
+            include         fastcgi_params;
+        }
+    }
 
 这里特别感谢huxos同学提供的宝贵意见 ^_^
